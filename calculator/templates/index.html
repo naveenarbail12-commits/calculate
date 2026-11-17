@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Number Calculator · Addition &amp; Subtraction</title>
+
+  <!-- Typography: Plus Jakarta Sans for clean UI & JetBrains Mono for tabular numbers -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+    rel="stylesheet"
+  />
+
+  <!-- Link Flask static stylesheet -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+  <main class="page-wrapper">
+    <!-- Top Header -->
+    <header class="page-header">
+      <div class="header-text">
+        <h1>Multi-Number Calculator</h1>
+        <p class="subtitle">
+          Type numbers one by one to build your list, then add or subtract them.
+        </p>
+      </div>
+      <button type="button" id="load-example-btn" class="text-action-btn">
+        Load Example (100, 50, 25)
+      </button>
+    </header>
+
+    <!-- Main 2-Column Calculator Workspace -->
+    <section class="calculator-grid" aria-label="Calculator Workspace">
+      <!-- Left Column: Single Continuous Input & Operation Buttons -->
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Enter Numbers One by One</h2>
+        </div>
+
+        <form id="calculator-form" action="/calculate" method="POST" novalidate>
+          <!-- Single Number Input Row -->
+          <div class="single-entry-group">
+            <label for="single-number-input" class="input-label">
+              Number
+            </label>
+            <div class="input-control-group">
+              <input
+                id="single-number-input"
+                type="text"
+                inputmode="decimal"
+                placeholder="Type a number (e.g. 666) and press Enter"
+                class="number-input"
+                autofocus
+              />
+              <button
+                type="button"
+                id="add-to-list-btn"
+                class="add-entry-btn"
+              >
+                + Add
+              </button>
+            </div>
+            <p class="input-hint">
+              Press <strong>Enter</strong> or click <strong>+ Add</strong> after each number.
+            </p>
+          </div>
+
+          <!-- Running Sequence of Added Numbers -->
+          <div class="sequence-section">
+            <div class="sequence-header">
+              <span class="sequence-title">Added Numbers</span>
+              <span id="sequence-count" class="meta-text">0 numbers</span>
+            </div>
+
+            <div id="sequence-empty" class="sequence-empty">
+              No numbers added yet. Type your first number above.
+            </div>
+
+            <ul id="sequence-list" class="sequence-list hidden" aria-label="Added numbers list"></ul>
+          </div>
+
+          <!-- Primary Operation Buttons -->
+          <div class="action-buttons">
+            <button
+              type="submit"
+              name="operation"
+              value="add"
+              data-operation="add"
+              class="btn btn-primary"
+            >
+              Add Numbers (+)
+            </button>
+            <button
+              type="submit"
+              name="operation"
+              value="subtract"
+              data-operation="subtract"
+              class="btn btn-secondary"
+            >
+              Subtract Numbers (&minus;)
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Right Column: Same-Page Result Display -->
+      <div class="panel result-panel" aria-live="polite">
+        <div class="panel-header">
+          <h2>Result</h2>
+          <span id="operation-meta" class="meta-text">
+            {% if outcome is defined and outcome.success %}
+              {{ outcome.operation_label }} &middot; {{ outcome.numbers | length }} numbers
+            {% else %}
+              Ready to calculate
+            {% endif %}
+          </span>
+        </div>
+
+        <!-- Error Message Box (hidden unless there is an error) -->
+        <div
+          id="error-box"
+          class="error-box {% if not (outcome is defined and not outcome.success) %}hidden{% endif %}"
+          role="alert"
+        >
+          <strong>Check your inputs:</strong>
+          <span id="error-message">
+            {% if outcome is defined and not outcome.success %}{{ outcome.error }}{% endif %}
+          </span>
+        </div>
+
+        <!-- Calculated Result Display -->
+        <div id="result-content" class="result-content">
+          {% if outcome is defined and outcome.success %}
+            <div class="result-value" id="result-value">{{ outcome.result }}</div>
+            <div class="expression-box">
+              <span class="expression-label">Calculation</span>
+              <code class="expression-text" id="expression-text">
+                {{ outcome.expression }} = {{ outcome.result }}
+              </code>
+            </div>
+          {% else %}
+            <div class="result-value muted" id="result-value">&mdash;</div>
+            <div class="expression-box">
+              <span class="expression-label">Calculation</span>
+              <code class="expression-text" id="expression-text">
+                Add numbers above, then choose Add or Subtract
+              </code>
+            </div>
+          {% endif %}
+        </div>
+
+        <hr class="divider" />
+
+        <!-- Helpful Formula Reference -->
+        <div class="formula-note">
+          <p>
+            <strong>Addition:</strong> Sums all entered values
+            (<code>N1 + N2 + N3 &hellip;</code>).
+          </p>
+          <p>
+            <strong>Subtraction:</strong> Subtracts sequentially from the first number
+            (<code>N1 - N2 - N3 &hellip;</code>).
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Beginner-friendly JavaScript for continuous one-by-one input & Flask AJAX -->
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const form = document.getElementById("calculator-form");
+      const numberInput = document.getElementById("single-number-input");
+      const addToListBtn = document.getElementById("add-to-list-btn");
+      const loadExampleBtn = document.getElementById("load-example-btn");
+
+      const sequenceListEl = document.getElementById("sequence-list");
+      const sequenceEmptyEl = document.getElementById("sequence-empty");
+      const sequenceCountEl = document.getElementById("sequence-count");
+
+      const resultValueEl = document.getElementById("result-value");
+      const expressionTextEl = document.getElementById("expression-text");
+      const operationMetaEl = document.getElementById("operation-meta");
+      const errorBoxEl = document.getElementById("error-box");
+      const errorMessageEl = document.getElementById("error-message");
+
+      // Holds all numbers added one by one along with their date & time
+      let entries = [];
+      let selectedOperation = "add";
+
+      function formatTimestamp(date) {
+        return new Intl.DateTimeFormat("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit",
+        }).format(date);
+      }
+
+      document.querySelectorAll("button[data-operation]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          selectedOperation = btn.getAttribute("data-operation");
+        });
+      });
+
+      function showError(message) {
+        errorMessageEl.textContent = message;
+        errorBoxEl.classList.remove("hidden");
+      }
+
+      function hideError() {
+        errorBoxEl.classList.add("hidden");
+        errorMessageEl.textContent = "";
+      }
+
+      // Render the list of continuously added numbers with their date and time
+      function renderSequence() {
+        sequenceListEl.innerHTML = "";
+        sequenceCountEl.textContent =
+          entries.length === 1 ? "1 number" : `${entries.length} numbers`;
+
+        if (entries.length === 0) {
+          sequenceEmptyEl.classList.remove("hidden");
+          sequenceListEl.classList.add("hidden");
+          return;
+        }
+
+        sequenceEmptyEl.classList.add("hidden");
+        sequenceListEl.classList.remove("hidden");
+
+        entries.forEach((entry, idx) => {
+          const item = document.createElement("li");
+          item.className = "sequence-item";
+
+          const indexSpan = document.createElement("span");
+          indexSpan.className = "sequence-index";
+          indexSpan.textContent = `${idx + 1}.`;
+
+          const valueSpan = document.createElement("span");
+          valueSpan.className = "sequence-value";
+          valueSpan.textContent = entry.value;
+
+          const timeSpan = document.createElement("span");
+          timeSpan.className = "sequence-timestamp";
+          timeSpan.textContent = entry.addedAt;
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "sequence-remove-btn";
+          removeBtn.innerHTML = "&times;";
+          removeBtn.setAttribute("aria-label", `Remove ${entry.value}`);
+          removeBtn.title = "Remove this number";
+          removeBtn.addEventListener("click", () => {
+            entries.splice(idx, 1);
+            renderSequence();
+            hideError();
+          });
+
+          item.appendChild(indexSpan);
+          item.appendChild(valueSpan);
+          item.appendChild(timeSpan);
+          item.appendChild(removeBtn);
+          sequenceListEl.appendChild(item);
+        });
+      }
+
+      // Push the current value in the single input box into the entries list
+      function addCurrentInputToList() {
+        const raw = numberInput.value.trim();
+        if (raw === "") {
+          showError("Please type a number before adding.");
+          numberInput.focus();
+          return false;
+        }
+
+        if (!/^[+-]?(\d+(\.\d*)?|\.\d+)$/.test(raw)) {
+          showError(`'${raw}' is not a valid number.`);
+          numberInput.focus();
+          return false;
+        }
+
+        hideError();
+        entries.push({
+          value: raw,
+          addedAt: formatTimestamp(new Date()),
+        });
+        numberInput.value = "";
+        renderSequence();
+        numberInput.focus();
+        return true;
+      }
+
+      // Clicking "+ Add" pushes the current number and clears the input for the next one
+      addToListBtn.addEventListener("click", () => {
+        addCurrentInputToList();
+      });
+
+      // Pressing Enter inside the input box adds the number instead of submitting early
+      numberInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          addCurrentInputToList();
+        }
+      });
+
+      // Load the example values: 100, 50, 25
+      loadExampleBtn.addEventListener("click", () => {
+        const now = formatTimestamp(new Date());
+        entries = [
+          { value: "100", addedAt: now },
+          { value: "50", addedAt: now },
+          { value: "25", addedAt: now },
+        ];
+        numberInput.value = "";
+        renderSequence();
+        hideError();
+        numberInput.focus();
+      });
+
+      // Send all added numbers to Flask /calculate when Add Numbers or Subtract Numbers is clicked
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        hideError();
+
+        // If user typed a number in the input box right before clicking Add/Subtract, include it too
+        const pendingValue = numberInput.value.trim();
+        if (pendingValue !== "") {
+          const added = addCurrentInputToList();
+          if (!added) return;
+        }
+
+        if (entries.length < 2) {
+          showError("Please add at least 2 numbers before calculating.");
+          numberInput.focus();
+          return;
+        }
+
+        try {
+          const response = await fetch("/calculate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              numbers: entries.map((entry) => entry.value),
+              operation: selectedOperation,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok || !data.success) {
+            showError(data.error || "Unable to calculate result.");
+            return;
+          }
+
+          // Display the result on the same page
+          resultValueEl.textContent = data.result;
+          resultValueEl.classList.remove("muted");
+          expressionTextEl.textContent = `${data.expression} = ${data.result}`;
+          operationMetaEl.textContent = `${data.operation_label} · ${data.numbers.length} numbers`;
+        } catch (err) {
+          showError("Could not reach the Flask server. Please try again.");
+        }
+      });
+
+      renderSequence();
+    });
+  </script>
+</body>
+</html>
